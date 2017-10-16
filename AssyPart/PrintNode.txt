@@ -1,0 +1,163 @@
+﻿ 
+ The PrintUtility class should be fairly easy to use from just about any Windows Forms application. Just call either PrintTree or PrintPreviewTree, passing in your TreeView.
+ Private Print_Image As Image
+
+    'This is used to take the picture 
+    Declare Auto Function BitBlt Lib "GDI32.DLL" ( _
+        ByVal hdcDest As IntPtr, _
+        ByVal nXDest As Integer, _
+        ByVal nYDest As Integer, _
+        ByVal nWidth As Integer, _
+        ByVal nHeight As Integer, _
+        ByVal hdcSrc As IntPtr, _
+        ByVal nXSrc As Integer, _
+        ByVal nYSrc As Integer, _
+        ByVal dwRop As Int32) As Boolean
+
+
+    Private Sub Button1_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles Button1.Click
+
+        'Get a Graphics Object from the form 
+        Dim gr As Graphics = TreeView1.CreateGraphics
+
+        'Create a bitmap from that graphics 
+        Dim img As New Bitmap(TreeView1.Width, TreeView1.Height, gr)
+
+        'Create a Graphics object in memory from that bitmap 
+        Dim memG As Graphics = Graphics.FromImage(img)
+
+        'get the IntPtr's of the graphics 
+        Dim HDC1 As IntPtr = gr.GetHdc
+        Dim HDC2 As IntPtr = memG.GetHdc
+
+        'get the picture 
+        BitBlt(HDC2, 0, 0, TreeView1.ClientRectangle.Width, TreeView1.ClientRectangle.Height, HDC1, 0, 0, 13369376)
+
+        'Clone the bitmap so we can dispose this one 
+        Me.Print_Image = img.Clone()
+
+        'Clean Up 
+        gr.ReleaseHdc(HDC1)
+        memG.ReleaseHdc(HDC2)
+        gr.Dispose()
+        memG.Dispose()
+        img.Dispose()
+
+        PrintDocument1.Print()
+
+    End Sub
+
+    Private Sub PrintDocument1_PrintPage(ByVal sender As Object, ByVal e As Drawing.Printing.PrintPageEventArgs) Handles PrintDocument1.PrintPage
+
+        'Now we draw the image to the PrintDocument's Graphics object 
+        'the 0 and 0 are where on the page it will be printed 
+        '0, 0 makes it print in the top left corner of the page 
+        e.Graphics.DrawImage(Me.Print_Image, 0, 0)
+
+    End Sub
+
+	**************************
+	private void PrepareTreeImage(TreeView tree){
+    _scrollBarWidth = tree.Width - tree.ClientSize.Width;
+    _scrollBarHeight = tree.Height - tree.ClientSize.Height;
+    tree.Nodes[0].EnsureVisible();
+    int height = tree.Nodes[0].Bounds.Height;
+    this._nodeHeight = height;
+    int width = tree.Nodes[0].Bounds.Right;
+    TreeNode node = tree.Nodes[0].NextVisibleNode;
+    while(node != null){
+        height += node.Bounds.Height;
+        if(node.Bounds.Right > width){
+            width = node.Bounds.Right;
+        }
+        node = node.NextVisibleNode;
+    }
+    //keep track of the original tree settings
+    int tempHeight = tree.Height;
+    int tempWidth = tree.Width;
+    BorderStyle tempBorder = tree.BorderStyle;
+    bool tempScrollable = tree.Scrollable;
+    TreeNode selectedNode = tree.SelectedNode;
+    //setup the tree to take the snapshot
+    tree.SelectedNode = null;
+    DockStyle tempDock = tree.Dock;
+    tree.Height = height + _scrollBarHeight;
+    tree.Width = width + _scrollBarWidth;
+    tree.BorderStyle = BorderStyle.None;
+    tree.Dock = DockStyle.None;
+    //get the image of the tree
+    this._controlImage = GetImage(tree.Handle, tree.Width, tree.Height);
+    //reset the tree to its original settings
+    tree.BorderStyle = tempBorder;
+    tree.Width = tempWidth;
+    tree.Height = tempHeight;
+    tree.Dock = tempDock;
+    tree.Scrollable = tempScrollable;
+    tree.SelectedNode = selectedNode;
+    //give the window time to update
+    Application.DoEvents();
+}
+
+When it is time to print the resulting image, there is some calculation to do to divide the image up into sections of the proper size to fit on the printed page. This is handled in the printDoc_PrintPage method which handles the PrintPage event of the PrintDocument. This is pretty straightforward. We have to keep track of the direction we are moving in, horizontally or vertically, across the source image. We also must keep track of where we left off in the image when the previous page was printed.
+
+Hide   Shrink    Copy Code
+private void printDoc_PrintPage(object sender, 
+        System.Drawing.Printing.PrintPageEventArgs e) {
+    this._pageNumber++;
+    Graphics g = e.Graphics;
+    Rectangle sourceRect = new Rectangle(_lastPrintPosition, e.MarginBounds.Size);
+    Rectangle destRect = e.MarginBounds;
+
+    if((sourceRect.Height % this._nodeHeight) > 0){
+        sourceRect.Height -= (sourceRect.Height % this._nodeHeight);
+    }
+    g.DrawImage(this._controlImage, destRect, sourceRect, GraphicsUnit.Pixel);
+    //check to see if we need more pages
+    if((this._controlImage.Height - this._scrollBarHeight) > sourceRect.Bottom
+     || (this._controlImage.Width - this._scrollBarWidth) > sourceRect.Right){
+        //need more pages
+        e.HasMorePages = true;
+    }
+    if(this._currentDir == PrintDirection.Horizontal){
+        if(sourceRect.Right < (this._controlImage.Width - this._scrollBarWidth)){
+            //still need to print horizontally
+            _lastPrintPosition.X += (sourceRect.Width + 1);
+        }
+        else{
+            _lastPrintPosition.X = 0;
+            _lastPrintPosition.Y += (sourceRect.Height + 1);
+            this._currentDir = PrintDirection.Vertical;
+        }
+    }
+    else if(this._currentDir == PrintDirection.Vertical && sourceRect.Right 
+    < (this._controlImage.Width - this._scrollBarWidth)){
+        this._currentDir = PrintDirection.Horizontal;
+        _lastPrintPosition.X += (sourceRect.Width + 1);
+    }
+    else{
+        _lastPrintPosition.Y += (sourceRect.Height + 1);
+    }
+
+    //print footer
+    Brush brush = new SolidBrush(Color.Black);
+    string footer = this._pageNumber.ToString(
+           System.Globalization.NumberFormatInfo.CurrentInfo);
+    Font f = new Font(FontFamily.GenericSansSerif, 10f);
+    SizeF footerSize = g.MeasureString(footer, f);
+    PointF pageBottomCenter = new PointF(e.PageBounds.Width/2, 
+       e.MarginBounds.Bottom + 
+       ((e.PageBounds.Bottom - e.MarginBounds.Bottom)/2));
+    PointF footerLocation = new PointF(pageBottomCenter.X - (footerSize.Width/2), 
+            pageBottomCenter.Y - (footerSize.Height/2));
+    g.DrawString(footer, f, brush, footerLocation);
+        
+    //print header
+    if(this._pageNumber == 1 && this._title.Length > 0){
+        Font headerFont = new Font(FontFamily.GenericSansSerif, 24f, 
+        FontStyle.Bold, GraphicsUnit.Point);
+        SizeF headerSize = g.MeasureString(this._title, headerFont);
+        PointF headerLocation = new PointF(e.MarginBounds.Left, 
+        ((e.MarginBounds.Top - e.PageBounds.Top)/2) - (headerSize.Height/2));
+        g.DrawString(this._title, headerFont, brush, headerLocation);
+    }
+}
